@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gemdoku</title>
+<style>
+:root{
+  --bg:#faf3ec; --card:#ffffff; --ink:#4a3b34; --sub:#8a7468; --accent:#c76b8f;
+  --ok:#3aa06b; --bad:#d9534f; --line:#e7d9cc;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+  box-sizing:border-box;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --bg:#221c19; --card:#2e2622; --ink:#f2e7de; --sub:#b9a99c; --line:#453a33; }
+}
+:root[data-theme="dark"]{ --bg:#221c19; --card:#2e2622; --ink:#f2e7de; --sub:#b9a99c; --line:#453a33; }
+html{scroll-padding-top:env(safe-area-inset-top,0px);}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;min-height:100%;}
+.wrap{max-width:640px;margin:0 auto;padding:14px 14px 40px;}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.stat{text-align:center;flex:1;}
+.stat .n{font-size:1.4rem;font-weight:800;}
+.stat .l{font-size:.72rem;color:var(--sub);text-transform:uppercase;letter-spacing:.05em;}
+.mistakes{display:flex;gap:4px;justify-content:center;}
+.mistakes span{width:10px;height:10px;border-radius:50%;background:var(--line);}
+.mistakes span.lost{background:var(--bad);}
+.board{display:grid;gap:3px;background:var(--line);border-radius:14px;overflow:hidden;padding:3px;margin:16px 0;touch-action:manipulation;}
+.cell{position:relative;aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;font-size:1.1rem;cursor:pointer;user-select:none;filter:brightness(1);}
+.cell.mark::after{content:"✕";opacity:.45;font-size:.75em;}
+.cell.gem::after{content:"◆";color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);font-size:1.15em;}
+.cell.bad{animation:flash .5s;}
+.cell.hint{outline:3px solid #ffd23f;outline-offset:-3px;}
+@keyframes flash{0%,100%{filter:brightness(1);}50%{filter:brightness(1.6);}}
+.hints{display:flex;gap:10px;justify-content:center;margin-top:6px;}
+.hbtn{flex:1;max-width:150px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 6px;text-align:center;cursor:pointer;}
+.hbtn .ic{font-size:1.4rem;}
+.hbtn .t{font-size:.7rem;color:var(--sub);margin-top:2px;}
+.hbtn:active{transform:scale(.96);}
+.hbtn.disabled{opacity:.4;pointer-events:none;}
+.charges{text-align:center;color:var(--sub);font-size:.78rem;margin:8px 0 4px;}
+.msg{text-align:center;color:var(--accent);font-weight:600;min-height:1.3em;margin-top:6px;font-size:.9rem;}
+.rules{display:flex;gap:8px;margin:10px 0;}
+.rule{flex:1;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;font-size:.68rem;color:var(--sub);text-align:center;}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:20px;z-index:10;}
+.overlay.show{display:flex;}
+.modal{background:var(--card);border-radius:16px;padding:24px;text-align:center;max-width:320px;}
+.modal h2{margin:0 0 8px;}
+.modal button{margin-top:14px;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 22px;font-weight:700;cursor:pointer;}
+h1{text-align:center;font-size:1.1rem;letter-spacing:.06em;color:var(--sub);margin:0 0 6px;text-transform:uppercase;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>◆ Gemdoku</h1>
+  <div class="top">
+    <div class="stat"><div class="n" id="lvl">1</div><div class="l">Level</div></div>
+    <div class="stat"><div class="n" id="score">0</div><div class="l">Score</div></div>
+    <div class="stat"><div class="mistakes" id="mist"></div><div class="l">Mistakes</div></div>
+  </div>
+  <div class="rules">
+    <div class="rule">◆ One gem per color region</div>
+    <div class="rule">◆ One gem per row &amp; column</div>
+    <div class="rule">◆ Gems can't touch (any side)</div>
+  </div>
+  <div class="board" id="board"></div>
+  <div class="charges">✨ Hint charges left: <b id="charges">3</b></div>
+  <div class="hints">
+    <div class="hbtn" id="hReveal"><div class="ic">🔮</div><div class="t">Reveal</div></div>
+    <div class="hbtn" id="hIdea"><div class="ic">💡</div><div class="t">Idea</div></div>
+    <div class="hbtn" id="hScan"><div class="ic">🧭</div><div class="t">Scan (tap/dbl-tap)</div></div>
+  </div>
+  <div class="msg" id="msg"></div>
+</div>
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2 id="mTitle">Level Complete!</h2>
+    <p id="mBody" style="color:var(--sub)"></p>
+    <button id="mBtn">Next Level</button>
+  </div>
+</div>
+<script>
+(function(){
+'use strict';
+var PALETTE=["#e8b4c8","#a7d0c9","#f2c299","#c7b3e0","#f0e3a3","#9fc9e0","#e0a9a0","#b8cf8f","#d9b8e8","#e8d0a0","#a0d9c9","#e0b0b0","#c0d0e8","#f0d0b0","#d0e0a0"];
+
+function saveLS(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
+function loadLS(k,d){try{var v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch(e){return d;}}
+
+var state={level:1,score:0,mistakes:0,size:8,solution:[],regions:[],cells:[],hintCharges:3,scanRevealed:{},solved:false};
+
+function sizeForLevel(l){return Math.min(15,8+Math.floor((l-1)/6));}
+
+function genSolution(n){
+  var cols=[]; var order=shuffleRange(n);
+  function backtrack(row,used){
+    if(row===n) return [];
+    var opts=order.slice();
+    for(var i=0;i<opts.length;i++){
+      var c=opts[i];
+      if(used.indexOf(c)>=0) continue;
+      if(cols.length && Math.abs(c-cols[cols.length-1])<=1) continue;
+      cols.push(c); used.push(c);
+      var rest=backtrack(row+1,used);
+      if(rest!==null){ return [c].concat(rest); }
+      cols.pop(); used.pop();
+    }
+    return null;
+  }
+  var res=null,tries=0;
+  while(!res && tries<400){ cols=[]; order=shuffleRange(n); res=backtrack(0,[]); tries++; }
+  if(!res){ // fallback simple diagonal-safe pattern
+    res=[]; var step=Math.max(2,Math.floor(n/2));
+    for(var r=0;r<n;r++) res.push((r*step)%n);
+  }
+  return res;
+}
+function shuffleRange(n){var a=[];for(var i=0;i<n;i++)a.push(i);for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+
+function genRegions(n,solCols){
+  var reg=new Array(n*n).fill(-1);
+  var frontiers=[];
+  for(var i=0;i<n;i++){ var idx=i*n+solCols[i]; reg[idx]=i; frontiers.push([idx]); }
+  var activeRegions=n;
+  while(activeRegions>0){
+    var order=shuffleRange(n);
+    activeRegions=0;
+    for(var oi=0;oi<n;oi++){
+      var ri=order[oi];
+      if(!frontiers[ri].length) continue;
+      activeRegions++;
+      var pick=Math.floor(Math.random()*frontiers[ri].length);
+      var cellIdx=frontiers[ri][pick];
+      frontiers[ri].splice(pick,1);
+      var r=Math.floor(cellIdx/n), c=cellIdx%n;
+      var nbrs=[[r-1,c],[r+1,c],[r,c-1],[r,c+1]];
+      for(var k=0;k<nbrs.length;k++){
+        var nr=nbrs[k][0], nc=nbrs[k][1];
+        if(nr<0||nc<0||nr>=n||nc>=n) continue;
+        var ni=nr*n+nc;
+        if(reg[ni]===-1){ reg[ni]=ri; frontiers[ri].push(ni); }
+      }
+    }
+  }
+  return reg;
+}
+
+function newLevel(){
+  state.mistakes=0; state.hintCharges=3; state.scanRevealed={}; state.solved=false;
+  state.size=sizeForLevel(state.level);
+  state.solution=genSolution(state.size);
+  state.regions=genRegions(state.size,state.solution);
+  state.cells=new Array(state.size*state.size).fill(0); // 0 empty,1 mark,2 gem
+  render();
+  setMsg('');
+}
+
+function idx(r,c){return r*state.size+c;}
+
+function render(){
+  var n=state.size;
+  var b=document.getElementById('board');
+  b.style.gridTemplateColumns='repeat('+n+',1fr)';
+  b.innerHTML='';
+  for(var r=0;r<n;r++){
+    for(var c=0;c<n;c++){
+      var i=idx(r,c);
+      var d=document.createElement('div');
+      d.className='cell';
+      d.style.background=PALETTE[state.regions[i]%PALETTE.length];
+      if(state.cells[i]===1) d.classList.add('mark');
+      if(state.cells[i]===2) d.classList.add('gem');
+      d.dataset.i=i;
+      (function(cellDiv,ci){
+        var lastTap=0;
+        cellDiv.addEventListener('click',function(){
+          var now=Date.now();
+          if(now-lastTap<320){ onDouble(ci); } else { onSingle(ci); }
+          lastTap=now;
+        });
+      })(d,i);
+      b.appendChild(d);
+    }
+  }
+  document.getElementById('lvl').textContent=state.level;
+  document.getElementById('score').textContent=state.score;
+  document.getElementById('charges').textContent=state.hintCharges;
+  var m=document.getElementById('mist'); m.innerHTML='';
+  for(var k=0;k<3;k++){ var s=document.createElement('span'); if(k<state.mistakes) s.className='lost'; m.appendChild(s); }
+  var hb=document.getElementById('hReveal'), hi=document.getElementById('hIdea'), hs=document.getElementById('hScan');
+  [hb,hi,hs].forEach(function(el){ el.classList.toggle('disabled', state.hintCharges<=0 || state.solved); });
+}
+
+function isSolutionCell(i){
+  var r=Math.floor(i/state.size), c=i%state.size;
+  return state.solution[r]===c;
+}
+
+function onSingle(i){
+  if(state.solved) return;
+  var v=state.cells[i];
+  var nv=(v+1)%3;
+  state.cells[i]=nv;
+  if(nv===2){ handleGemPlaced(i); }
+  render();
+}
+function onDouble(i){
+  if(state.solved) return;
+  // quick-confirm via scan: place correct state directly
+  state.cells[i]= isSolutionCell(i)?2:1;
+  if(state.cells[i]===2) handleGemPlaced(i);
+  render();
+}
+
+function handleGemPlaced(i){
+  if(!isSolutionCell(i)){
+    mistake(i);
+    return;
+  }
+  if(!conflictFree(i)){
+    mistake(i);
+    return;
+  }
+  checkWin();
+}
+function conflictFree(i){
+  var n=state.size, r=Math.floor(i/n), c=i%n, reg=state.regions[i];
+  for(var k=0;k<n*n;k++){
+    if(k===i || state.cells[k]!==2) continue;
+    var kr=Math.floor(k/n), kc=k%n;
+    if(kr===r || kc===c) return false;
+    if(state.regions[k]===reg) return false;
+    if(Math.abs(kr-r)<=1 && Math.abs(kc-c)<=1) return false;
+  }
+  return true;
+}
+function mistake(i){
+  state.cells[i]=0;
+  state.mistakes++;
+  var el=document.querySelector('.cell[data-i="'+i+'"]');
+  if(el){ el.classList.add('bad'); setTimeout(function(){el.classList.remove('bad');},500); }
+  render();
+  if(state.mistakes>=3){ endGame(false); }
+}
+function checkWin(){
+  var n=state.size,count=0;
+  for(var i=0;i<n*n;i++) if(state.cells[i]===2) count++;
+  if(count===n){
+    var ok=true;
+    for(var i=0;i<n*n;i++) if(state.cells[i]===2 && !isSolutionCell(i)) ok=false;
+    if(ok){ state.solved=true; state.score+=n*10; saveLS('gemdoku_score',state.score); endGame(true); }
+  }
+}
+
+function endGame(won){
+  var ov=document.getElementById('overlay');
+  var t=document.getElementById('mTitle'), bdy=document.getElementById('mBody'), btn=document.getElementById('mBtn');
+  if(won){
+    t.textContent='Level '+state.level+' Complete!';
+    bdy.textContent='+'+(state.size*10)+' points. On to level '+(state.level+1)+'.';
+    btn.textContent='Next Level';
+    btn.onclick=function(){ ov.classList.remove('show'); state.level++; saveLS('gemdoku_level',state.level); newLevel(); };
+  } else {
+    t.textContent='Out of Chances';
+    bdy.textContent='Three mistakes on level '+state.level+'. Try again?';
+    btn.textContent='Retry Level';
+    btn.onclick=function(){ ov.classList.remove('show'); newLevel(); };
+  }
+  ov.classList.add('show');
+}
+
+function setMsg(t){ document.getElementById('msg').textContent=t; }
+
+// Hint 1: Reveal — place one correct gem for free
+document.getElementById('hReveal').addEventListener('click',function(){
+  if(state.hintCharges<=0||state.solved) return;
+  var n=state.size,candidates=[];
+  for(var r=0;r<n;r++){ var c=state.solution[r]; if(state.cells[idx(r,c)]!==2) candidates.push(idx(r,c)); }
+  if(!candidates.length){ setMsg('All gems already placed!'); return; }
+  var pick=candidates[Math.floor(Math.random()*candidates.length)];
+  state.cells[pick]=2; state.hintCharges--;
+  setMsg('Revealed a gem for you.');
+  render(); checkWin();
+});
+
+// Hint 2: Idea — find a forced cell (row/col/region with exactly one legal empty cell) and apply it
+document.getElementById('hIdea').addEventListener('click',function(){
+  if(state.hintCharges<=0||state.solved) return;
+  var n=state.size;
+  function legal(i){
+    if(state.cells[i]!==0) return false;
+    var r=Math.floor(i/n),c=i%n,reg=state.regions[i];
+    for(var k=0;k<n*n;k++){
+      if(state.cells[k]!==2) continue;
+      var kr=Math.floor(k/n),kc=k%n;
+      if(kr===r||kc===c) return false;
+      if(state.regions[k]===reg) return false;
+      if(Math.abs(kr-r)<=1&&Math.abs(kc-c)<=1) return false;
+    }
+    return true;
+  }
+  var found=null,reason='';
+  for(var reg=0; reg<n && !found; reg++){
+    var hasGem=false, opens=[];
+    for(var i=0;i<n*n;i++){ if(state.regions[i]===reg){ if(state.cells[i]===2) hasGem=true; if(legal(i)) opens.push(i); } }
+    if(!hasGem && opens.length===1){ found=opens[0]; reason='That color only has one legal cell left — I placed it there.'; }
+  }
+  if(!found){
+    for(var r=0;r<n && !found;r++){
+      var hasGem=false, opens=[];
+      for(var c=0;c<n;c++){ var i=idx(r,c); if(state.cells[i]===2) hasGem=true; if(legal(i)) opens.push(i); }
+      if(!hasGem && opens.length===1){ found=opens[0]; reason='This row only had one legal cell left — placed automatically.'; }
+    }
+  }
+  if(!found){
+    for(var c=0;c<n && !found;c++){
+      var hasGem=false, opens=[];
+      for(var r=0;r<n;r++){ var i=idx(r,c); if(state.cells[i]===2) hasGem=true; if(legal(i)) opens.push(i); }
+      if(!hasGem && opens.length===1){ found=opens[0]; reason='This column only had one legal cell left — placed automatically.'; }
+    }
+  }
+  if(found){
+    state.hintCharges--; state.cells[found]=2; setMsg(reason); render(); checkWin();
+  } else {
+    // fallback: mark cells adjacent to placed gems as eliminated, doesn't cost extra beyond this charge
+    var did=false;
+    for(var i=0;i<n*n;i++){
+      if(state.cells[i]!==2) continue;
+      var r=Math.floor(i/n),c=i%n;
+      for(var dr=-1;dr<=1;dr++) for(var dc=-1;dc<=1;dc++){
+        if(!dr&&!dc) continue;
+        var nr=r+dr,nc=c+dc; if(nr<0||nc<0||nr>=n||nc>=n) continue;
+        var ni=idx(nr,nc);
+        if(state.cells[ni]===0){ state.cells[ni]=1; did=true; }
+      }
+    }
+    state.hintCharges--;
+    setMsg(did?'No forced cell yet — I marked cells that touch your gems.':'No clear next step yet — keep eliminating!');
+    render();
+  }
+});
+
+// Hint 3: Scan — reveal 3 random unrevealed cells, tap dismiss / dbl-tap confirm (handled by onDouble)
+document.getElementById('hScan').addEventListener('click',function(){
+  if(state.hintCharges<=0||state.solved) return;
+  var n=state.size,pool=[];
+  for(var i=0;i<n*n;i++) if(state.cells[i]===0) pool.push(i);
+  if(pool.length<1){ setMsg('Nothing left to scan.'); return; }
+  var picks=[];
+  for(var k=0;k<Math.min(3,pool.length);k++){ var p=Math.floor(Math.random()*pool.length); picks.push(pool[p]); pool.splice(p,1); }
+  picks.forEach(function(i){
+    var el=document.querySelector('.cell[data-i="'+i+'"]');
+    if(el) el.classList.add('hint');
+  });
+  setTimeout(function(){ picks.forEach(function(i){ var el=document.querySelector('.cell[data-i="'+i+'"]'); if(el) el.classList.remove('hint'); }); },2500);
+  state.hintCharges--;
+  setMsg('Scanned 3 cells — tap once to dismiss, double-tap to confirm a cell.');
+  render();
+});
+
+document.getElementById('overlay').classList.remove('show');
+state.level=loadLS('gemdoku_level',1);
+state.score=loadLS('gemdoku_score',0);
+newLevel();
+})();
+</script>
+</body>
+</html>
